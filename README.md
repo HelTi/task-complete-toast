@@ -6,8 +6,7 @@
 
 **运行已结束**（蓝色勾）
 
-- 智能体停止运行时出现，停留约 7 秒后自动消失。
-- 只在你「看着它」时计时：窗口失焦、页面被隐藏、鼠标悬停或键盘聚焦在提醒上时暂停，回到窗口继续走。
+- 智能体停止运行时出现，**不会自动消失**：点 × 关掉，或点卡片打开会话后才会收起。
 - 标题不代表成功——正常完成、失败、手动点停止都是这一条。运行结果本身仍在对话里。
 
 **等你处理**（琥珀色问号）
@@ -15,7 +14,7 @@
 - 智能体开始等你回答、确认方案或授权时出现，对应三种文案：「等你回答」「等你确认方案」「等你授权」。
 - **不会自动消失**：一直留到你回答完（提醒自己消失）或点 × 关掉。离开片刻再回来，它还在。
 
-两种提醒都可以点主体（标题和会话名）直接打开那个会话，点 × 关闭；最多同时堆叠 3 条。
+两种提醒都可以点主体（标题和会话名）直接打开那个会话，点 × 关闭。**没有任何一条会自己消失**：只有你操作才会收起来（「等你处理」的卡片在你回答完之后会自己收起，因为它在等的事情已经不存在了）。最多同时堆叠 3 条，溢出时先挤掉最早的「运行已结束」卡片。
 
 ## 声音
 
@@ -42,7 +41,7 @@
 
 ## 常量
 
-时长、堆叠数量和音量是 `client.js` 顶部的常量：`MAX_NOTICES`、`NOTICE_LIFETIME_MS`、`CHIME_GAIN`。待处理的提醒没有倒计时，所以要它快点消失只能手动关。插件没有 Config，修改这几个值要改文件并重启应用。
+时长、堆叠数量和音量是 `client.js` 顶部的常量：`MAX_NOTICES`、`CHIME_GAIN`。因为卡片不会自己消失，`MAX_NOTICES` 是唯一的上限；插件没有 Config，修改这两个值要改文件并重启应用。
 
 ## 关掉它
 
@@ -70,10 +69,8 @@ top-right corner of the window and a chime plays.
 
 **Run finished** (blue check)
 
-- Appears when the agent stops running and leaves after about seven seconds.
-- The countdown only runs while you can see it: it holds while the window is
-  unfocused, the page is hidden, or the card is hovered or focused, and resumes
-  when you come back.
+- Appears when the agent stops running and **never closes itself**: it goes away
+  when you press its cross, or open the session it names.
 - The headline reports that the run stopped, not that it succeeded: a normal
   completion, a failure, and the Stop button all produce this card. The outcome
   itself stays in the conversation.
@@ -87,8 +84,10 @@ top-right corner of the window and a chime plays.
   close it with the cross. A question asked while you were away is still there
   when you come back.
 
-Both kinds open the session when you click the card body, and stack up to three
-at a time.
+Both kinds open the session when you click the card body. **No card ever
+dismisses itself**: only your action clears one, except that a waiting card
+removes itself once you answer, because the thing it waits for is gone. Up to
+three cards stack; on overflow the oldest "run finished" card yields first.
 
 ## Sound
 
@@ -131,10 +130,10 @@ calls the Host, or polls.
 
 ## Constants
 
-Timing, stack depth, and volume are constants at the top of `client.js`:
-`MAX_NOTICES`, `NOTICE_LIFETIME_MS`, and `CHIME_GAIN`. Waiting cards carry no
-countdown, so closing them is the only way to clear one early. The plugin has no
-Config schema, so changing these means editing that file and restarting the app.
+Stack depth and volume are constants at the top of `client.js`: `MAX_NOTICES`
+and `CHIME_GAIN`. Cards never expire on their own, so `MAX_NOTICES` is the only
+limit on how many wait for you. The plugin has no Config schema, so changing
+these means editing that file and restarting the app.
 
 ## Turning it off
 

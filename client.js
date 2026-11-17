@@ -14,6 +14,10 @@
  * A stop is reported as the run having finished, not as success: the status
  * snapshot records a stop, and a stop covers a completed run, a failure, and the
  * user pressing Stop alike.
+ *
+ * Cards never close themselves. The user dismisses one with its cross, or by
+ * opening the Session it names; a waiting card also clears itself once that
+ * interaction is answered, because the thing it waits for is gone.
  */
 
 window.__ModuleLoader__.load({
@@ -34,12 +38,8 @@ window.__ModuleLoader__.load({
 
     /** Locale namespace of this plugin's copy. */
     const NS = 'task-complete-toast'
-    /** Newest notices kept on screen; an older one drops off the stack. */
+    /** Newest notices kept on screen; the oldest completion card drops off. */
     const MAX_NOTICES = 3
-    /** How long one notice stays before it dismisses itself. */
-    const NOTICE_LIFETIME_MS = 7000
-    /** Shortest resumed countdown, so a resumed notice cannot vanish at once. */
-    const MIN_VISIBLE_MS = 400
     /** Exit animation length; the notice leaves the stack after it. */
     const EXIT_MS = 200
     /** Peak gain of the chime: loud enough to carry across a room. */
@@ -218,23 +218,19 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * One notice card: a check, the localized headline, the Session title, and a
-     * dismiss control. The headline region opens the Session; hovering or
-     * focusing the card holds its countdown.
-     * @param props - notice, copy, and the open, dismiss, hold, and release callbacks.
+     * One notice card: a status icon, the localized headline, the Session title,
+     * and a dismiss control. The headline region opens the Session; the card
+     * stays until the user closes it.
+     * @param props - notice, copy, and the open and dismiss callbacks.
      * @returns the card element.
      */
     function NoticeCard(props) {
-      const { notice, t, onOpen, onDismiss, onHold, onRelease } = props
+      const { notice, t, onOpen, onDismiss } = props
       const pending = notice.kind !== 'finished'
       return h('div', {
         className: 'tct-card',
         'data-kind': notice.kind,
         'data-leaving': notice.leaving ? '' : undefined,
-        onPointerEnter: onHold,
-        onPointerLeave: onRelease,
-        onFocus: onHold,
-        onBlur: onRelease,
       },
       h('button', {
         type: 'button',
@@ -289,53 +285,22 @@ window.__ModuleLoader__.load({
       const seqRef = React.useRef(0)
       const dismissingRef = React.useRef(new Set())
       const exitTimersRef = React.useRef(new Map())
-      /** Per notice: remaining countdown, when it last started, and its timer. */
-      const clocksRef = React.useRef(new Map())
-      /** Per Session waiting on the user: the interaction kind and its notice. */
+      /** Per Session waiting on the user: the interaction key, kind, and its notice. */
       const pendingRef = React.useRef(new Map())
       const [notices, setNotices] = React.useState([])
       const noticesRef = React.useRef(notices)
       noticesRef.current = notices
 
-      /** Take the countdown time spent so far out of the clock and stop it. */
-      const hold = React.useCallback((id) => {
-        const clock = clocksRef.current.get(id)
-        if (clock === undefined) return
-        if (clock.timer !== null) {
-          window.clearTimeout(clock.timer)
-          clock.timer = null
-        }
-        if (clock.startedAt !== null) {
-          clock.remaining = Math.max(0, clock.remaining - (Date.now() - clock.startedAt))
-          clock.startedAt = null
-        }
-      }, [])
-
       const dismiss = React.useCallback((id) => {
         if (dismissingRef.current.has(id)) return
         dismissingRef.current.add(id)
-        hold(id)
-        clocksRef.current.delete(id)
         setNotices((list) => list.map((notice) => (notice.id === id ? { ...notice, leaving: true } : notice)))
         exitTimersRef.current.set(`exit:${id}`, window.setTimeout(() => {
           exitTimersRef.current.delete(`exit:${id}`)
           dismissingRef.current.delete(id)
           setNotices((list) => list.filter((notice) => notice.id !== id))
         }, EXIT_MS))
-      }, [hold])
-
-      /** Run the remaining countdown, unless the user is looking elsewhere. */
-      const release = React.useCallback((id) => {
-        const clock = clocksRef.current.get(id)
-        if (clock === undefined || clock.timer !== null) return
-        if (document.visibilityState === 'hidden' || !document.hasFocus()) return
-        clock.startedAt = Date.now()
-        clock.timer = window.setTimeout(() => {
-          clock.timer = null
-          clock.startedAt = null
-          dismiss(id)
-        }, Math.max(clock.remaining, MIN_VISIBLE_MS))
-      }, [dismiss])
+      }, [])
 
       const open = React.useCallback((sessionId) => {
         if (typeof openSession === 'function') openSession(sessionId)
@@ -343,30 +308,6 @@ window.__ModuleLoader__.load({
           if (notice.sessionId === sessionId) dismiss(notice.id)
         }
       }, [openSession, dismiss])
-
-      // A notice is only useful while the user can see it: hold every countdown
-      // while the page is hidden or the window is unfocused, and resume on the
-      // way back so a run that finished behind another app can still be read.
-      React.useEffect(() => {
-        const sync = () => {
-          for (const id of clocksRef.current.keys()) {
-            if (document.visibilityState === 'hidden' || !document.hasFocus()) hold(id)
-            else release(id)
-          }
-        }
-        document.addEventListener('visibilitychange', sync)
-        window.addEventListener('focus', sync)
-        window.addEventListener('blur', sync)
-        // A click inside the page proves the window is attended to, even when a
-        // focus event was missed.
-        window.addEventListener('pointerdown', sync)
-        return () => {
-          document.removeEventListener('visibilitychange', sync)
-          window.removeEventListener('focus', sync)
-          window.removeEventListener('blur', sync)
-          window.removeEventListener('pointerdown', sync)
-        }
-      }, [hold, release])
 
       // Every Session runs on its own; a live snapshot has one row per Session
       // with the Host running state and the interaction the Host is waiting on.
@@ -461,11 +402,7 @@ window.__ModuleLoader__.load({
             return next.filter((notice) => !dropped.has(notice.id))
           })
           for (const notice of created) {
-            if (notice.kind === 'finished') {
-              clocksRef.current.set(notice.id, { remaining: NOTICE_LIFETIME_MS, startedAt: null, timer: null })
-              release(notice.id)
-              continue
-            }
+            if (notice.kind === 'finished') continue
             const entry = carried.get(notice.sessionId)
             if (entry !== undefined) entry.noticeId = notice.id
           }
@@ -473,17 +410,12 @@ window.__ModuleLoader__.load({
         for (const noticeId of resolved) {
           if (noticeId !== null) dismiss(noticeId)
         }
-      }, [statuses, release, dismiss, playChime])
+      }, [statuses, dismiss, playChime])
 
-      // Timers must not outlive the entry, and a leaving card must not keep its
-      // bookkeeping after the plugin unloads.
+      // Exit timers must not outlive the entry.
       React.useEffect(() => () => {
         for (const timer of exitTimersRef.current.values()) window.clearTimeout(timer)
         exitTimersRef.current.clear()
-        for (const clock of clocksRef.current.values()) {
-          if (clock.timer !== null) window.clearTimeout(clock.timer)
-        }
-        clocksRef.current.clear()
       }, [])
 
       // The layer and its live region stay mounted while the plugin is live, so
@@ -500,8 +432,6 @@ window.__ModuleLoader__.load({
           t: copy,
           onOpen: open,
           onDismiss: dismiss,
-          onHold: () => { hold(notice.id) },
-          onRelease: () => { release(notice.id) },
         })))
       const host = typeof document === 'undefined' ? null : document.body
       return createPortal !== null && host !== null ? createPortal(layer, host) : layer
